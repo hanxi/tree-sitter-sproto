@@ -1,15 +1,12 @@
 module.exports = grammar({
   name: 'sproto',
 
-  // The extras array tells tree-sitter that these tokens can appear anywhere in the grammar.
-  // We'll put whitespace and comments here.
   extras: $ => [
     /\s/,
     $.comment,
   ],
 
   rules: {
-    // source_file is the root node, and it can contain multiple definitions.
     source_file: $ => repeat(
       choice(
         $.type_definition,
@@ -17,60 +14,92 @@ module.exports = grammar({
       )
     ),
 
-    // A comment starts with # and continues to the end of the line.
     comment: $ => /#.*/,
 
     // =============================================
-    // Type definition (e.g., .Person { ... })
+    // Type definition with nested types support
     // =============================================
     type_definition: $ => seq(
       '.',
       field('name', $.identifier),
       '{',
-      field('body', repeat($.field_definition)),
+      repeat(
+        choice(
+          $.field_definition,
+          $.nested_type_definition  // 分开处理嵌套类型
+        )
+      ),
       '}'
     ),
 
-    // Field definition (e.g., name 0 : *string(integer))
+    // 专门处理嵌套类型定义
+    nested_type_definition: $ => seq(
+      '.',
+      field('name', $.identifier),
+      '{',
+      repeat($.field_definition),
+      '}'
+    ),
+
     field_definition: $ => seq(
       field('name', $.identifier),
       field('tag', $.integer),
       ':',
       optional(field('is_array', '*')),
-      field('type', $.identifier),
-      optional(field('map_key_type', $.map_specifier))
+      field('type', $.type_specifier),
+      optional(
+        choice(
+          field('map_key_type', $.map_specifier),
+          field('fixed_point', $.fixed_point_specifier)
+        )
+      )
     ),
 
-    // Map key type definition (e.g., (string))
+    type_specifier: $ => choice(
+      'string',
+      'integer',
+      'boolean',
+      'binary',
+      'double',
+      $.identifier
+    ),
+
     map_specifier: $ => seq(
       '(',
-      field('key', $.identifier), // Usually integer or string
+      field('key', $.identifier),
+      ')'
+    ),
+
+    fixed_point_specifier: $ => seq(
+      '(',
+      field('precision', $.integer),
       ')'
     ),
 
     // =============================================
-    // Protocol definition (e.g., foobar 1 { ... })
+    // Protocol definition
     // =============================================
     protocol_definition: $ => seq(
       field('name', $.identifier),
       field('tag', $.integer),
       '{',
-      field('body', repeat(
+      repeat(
         choice(
           $.request_block,
           $.response_block,
-          $.type_definition,
+          $.type_definition
         )
-      )),
+      ),
       '}'
     ),
 
     request_block: $ => seq(
       'request',
-      optional(
-        seq(
+      choice(
+        field('type', $.type_specifier),  // 直接类型引用
+        seq(                              // 完整请求定义
           '{',
-          field('body', repeat($.field_definition)),
+          repeat($.field_definition),
           '}'
         )
       )
@@ -78,10 +107,11 @@ module.exports = grammar({
 
     response_block: $ => seq(
       'response',
-      optional(
-        seq(
+      choice(
+        field('type', $.type_specifier),  // 直接类型引用
+        seq(                              // 完整响应定义
           '{',
-          field('body', repeat($.field_definition)),
+          repeat($.field_definition),
           '}'
         )
       )
